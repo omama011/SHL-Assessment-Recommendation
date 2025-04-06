@@ -6,21 +6,11 @@ from sentence_transformers import SentenceTransformer
 # Load model, embeddings and metadata
 @st.cache_resource
 def load_model_and_embeddings():
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-
-    # Load CSV and metadata
+    model = SentenceTransformer("./all-MiniLM-L6-v2")  # Load from local folder
     data = pd.read_csv("shl_prepackaged_solutions_detailed.csv")
     metadata = data.to_dict(orient="records")
-
-    # Prepare text for embeddings
-    texts = [
-        f"{item.get('Assessment Name', '')} {item.get('Test Type', '')} {item.get('Remote Testing', '')} {item.get('Adaptive/IRT', '')}"
-        for item in metadata
-    ]
-
-    # Normalize embeddings
-    embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
-
+    texts = [item["Assessment Name"] + " " + item.get("Test Type", "") for item in metadata]
+    embeddings = model.encode(texts, convert_to_numpy=True)
     return model, embeddings, metadata
 
 # Recommend assessments using cosine similarity
