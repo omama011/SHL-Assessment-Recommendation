@@ -1,9 +1,9 @@
-services:
+services: 
   - type: web
     name: shl-assessment-recommender
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py
+    startCommand: streamlit run app.py --server.port 10000 --server.address 0.0.0.0
     region: oregon
     plan: free
     branch: main
