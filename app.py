@@ -1,21 +1,18 @@
 import streamlit as st
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, BertModel
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 @st.cache_resource
 def load_model_and_embeddings():
-    # Load model & tokenizer from local directory
     tokenizer = AutoTokenizer.from_pretrained("./all-MiniLM-L6-v2")
-    model = AutoModel.from_pretrained("./all-MiniLM-L6-v2")
+    model = BertModel.from_pretrained("./all-MiniLM-L6-v2")
 
-    # Load metadata
     data = pd.read_csv("shl_prepackaged_solutions_detailed.csv")
     metadata = data.to_dict(orient="records")
 
-    # Create embeddings
     texts = [item["Assessment Name"] + " " + str(item.get("Test Type", "")) for item in metadata]
     embeddings = get_embeddings(texts, tokenizer, model)
 
