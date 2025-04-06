@@ -1,58 +1,67 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import faiss
 from sentence_transformers import SentenceTransformer
-import json
 
-# Load model and FAISS index
+# Load model, embeddings and metadata
 @st.cache_resource
-def load_model_and_index():
+def load_model_and_embeddings():
     model = SentenceTransformer("all-MiniLM-L6-v2")
-    index = faiss.read_index("shl_index.faiss")
-    return model, index
 
-# Load metadata
-@st.cache_data
-def load_metadata():
+    # Load CSV and metadata
     data = pd.read_csv("shl_prepackaged_solutions_detailed.csv")
     metadata = data.to_dict(orient="records")
-    return metadata
 
-# Recommendation logic
-def recommend_assessments(query, model, index, metadata, top_k=10):
-    query_embedding = model.encode([query])[0].astype("float32")
-    distances, indices = index.search(np.array([query_embedding]), top_k)
+    # Prepare text for embeddings
+    texts = [
+        f"{item.get('Assessment Name', '')} {item.get('Test Type', '')} {item.get('Remote Testing', '')} {item.get('Adaptive/IRT', '')}"
+        for item in metadata
+    ]
 
+    # Normalize embeddings
+    embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+
+    return model, embeddings, metadata
+
+# Recommend assessments using cosine similarity
+def recommend_assessments(query, model, embeddings, metadata, top_k=10):
+    query_embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
+
+    # Cosine similarity = dot product since embeddings are normalized
+    similarity_scores = np.dot(embeddings, query_embedding)
+
+    # Get indices of top_k scores
+    top_indices = similarity_scores.argsort()[::-1][:top_k]
+
+    # Build result list
     results = []
-    for idx, dist in zip(indices[0], distances[0]):
-        if idx < len(metadata):
-            record = metadata[idx]
-            result = {
-                "Assessment Name": record["Assessment Name"],
-                "URL": record.get("Link", "N/A"),
-                "Remote Testing Support": record.get("Remote Testing", "N/A"),
-                "Adaptive/IRT Support": record.get("Adaptive/IRT", "N/A"),
-                "Duration": f"{record.get('Completion Time (mins)', 'N/A')} mins",
-                "Test Type": record.get("Test Type", "N/A"),
-                "Similarity Score": f"{1 - dist:.4f}"
-            }
-            results.append(result)
+    for idx in top_indices:
+        record = metadata[idx]
+        result = {
+            "Assessment Name": record.get("Assessment Name", "N/A"),
+            "URL": record.get("Link", "N/A"),
+            "Remote Testing Support": record.get("Remote Testing", "N/A"),
+            "Adaptive/IRT Support": record.get("Adaptive/IRT", "N/A"),
+            "Duration": f"{record.get('Completion Time (mins)', 'N/A')} mins",
+            "Test Type": record.get("Test Type", "N/A"),
+            "Similarity Score": f"{similarity_scores[idx]:.4f}"
+        }
+        results.append(result)
+
     return results
 
-# Streamlit UI
+# Streamlit app
 def main():
     st.set_page_config(page_title="SHL Assessment Recommender", layout="wide")
     st.title("🔍 SHL Assessment Recommendation Engine")
     st.markdown("Get the best-matching SHL assessments by describing your hiring needs below.")
 
-    # Load everything
-    model, index = load_model_and_index()
-    metadata = load_metadata()
+    # Load model and data
+    model, embeddings, metadata = load_model_and_embeddings()
 
     # User input
     query = st.text_area("💬 Enter your query:", 
-        placeholder="E.g. Looking to hire mid-level professionals proficient in Python, SQL and JavaScript. Max 60-minute test.")
+        placeholder="E.g. Looking to hire mid-level professionals with Python, SQL, and communication skills.")
 
     top_k = st.slider("🔢 Number of Recommendations", 1, 20, 10)
 
@@ -60,8 +69,8 @@ def main():
         if not query.strip():
             st.warning("Please enter a valid query.")
         else:
-            with st.spinner("Generating recommendations..."):
-                recommendations = recommend_assessments(query, model, index, metadata, top_k=top_k)
+            with st.spinner("Finding best matches..."):
+                recommendations = recommend_assessments(query, model, embeddings, metadata, top_k=top_k)
 
             if recommendations:
                 st.success(f"Top {top_k} Recommendations:")
@@ -75,7 +84,7 @@ def main():
                     st.markdown(f"- **Similarity Score:** {rec['Similarity Score']}")
                     st.markdown("---")
             else:
-                st.warning("No recommendations found.")
+                st.warning("No matching assessments found.")
 
 if __name__ == "__main__":
     main()
