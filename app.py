@@ -1,60 +1,90 @@
 import streamlit as st
 import pandas as pd
-import torch
-from transformers import AutoTokenizer, BertModel
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
 
+# Load model, embeddings and metadata
 @st.cache_resource
 def load_model_and_embeddings():
-    tokenizer = AutoTokenizer.from_pretrained("./all-MiniLM-L6-v2")
-    model = BertModel.from_pretrained("./all-MiniLM-L6-v2")
+    model = SentenceTransformer("all-MiniLM-L6-v2")
 
+    # Load CSV and metadata
     data = pd.read_csv("shl_prepackaged_solutions_detailed.csv")
     metadata = data.to_dict(orient="records")
 
-    texts = [item["Assessment Name"] + " " + str(item.get("Test Type", "")) for item in metadata]
-    embeddings = get_embeddings(texts, tokenizer, model)
+    # Prepare text for embeddings
+    texts = [
+        f"{item.get('Assessment Name', '')} {item.get('Test Type', '')} {item.get('Remote Testing', '')} {item.get('Adaptive/IRT', '')}"
+        for item in metadata
+    ]
 
-    return tokenizer, model, embeddings, metadata
+    # Normalize embeddings
+    embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
 
-def get_embeddings(texts, tokenizer, model):
-    # Create embeddings for a list of texts
-    model.eval()
-    embeddings = []
+    return model, embeddings, metadata
 
-    with torch.no_grad():
-        for text in texts:
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-            outputs = model(**inputs)
-            # Use mean pooling on last hidden state
-            embedding = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
-            embeddings.append(embedding)
+# Recommend assessments using cosine similarity
+def recommend_assessments(query, model, embeddings, metadata, top_k=10):
+    query_embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
 
-    return np.array(embeddings)
+    # Cosine similarity = dot product since embeddings are normalized
+    similarity_scores = np.dot(embeddings, query_embedding)
 
-def search(query, tokenizer, model, embeddings, metadata, top_k=5):
-    query_embedding = get_embeddings([query], tokenizer, model)[0]
-    similarities = cosine_similarity([query_embedding], embeddings)[0]
-    top_indices = similarities.argsort()[::-1][:top_k]
-    return [metadata[i] for i in top_indices]
+    # Get indices of top_k scores
+    top_indices = similarity_scores.argsort()[::-1][:top_k]
 
+    # Build result list
+    results = []
+    for idx in top_indices:
+        record = metadata[idx]
+        result = {
+            "Assessment Name": record.get("Assessment Name", "N/A"),
+            "URL": record.get("Link", "N/A"),
+            "Remote Testing Support": record.get("Remote Testing", "N/A"),
+            "Adaptive/IRT Support": record.get("Adaptive/IRT", "N/A"),
+            "Duration": f"{record.get('Completion Time (mins)', 'N/A')} mins",
+            "Test Type": record.get("Test Type", "N/A"),
+            "Similarity Score": f"{similarity_scores[idx]:.4f}"
+        }
+        results.append(result)
+
+    return results
+
+# Streamlit app
 def main():
-    st.title("SHL Assessment Recommendation App")
+    st.set_page_config(page_title="SHL Assessment Recommender", layout="wide")
+    st.title("🔍 SHL Assessment Recommendation Engine")
+    st.markdown("Get the best-matching SHL assessments by describing your hiring needs below.")
 
-    tokenizer, model, embeddings, metadata = load_model_and_embeddings()
+    # Load model and data
+    model, embeddings, metadata = load_model_and_embeddings()
 
-    query = st.text_input("Enter a role, skill, or keyword:")
+    # User input
+    query = st.text_area("💬 Enter your query:", 
+        placeholder="E.g. Looking to hire mid-level professionals with Python, SQL, and communication skills.")
 
-    if query:
-        results = search(query, tokenizer, model, embeddings, metadata)
-        st.subheader("Top Recommendations:")
-        for i, result in enumerate(results, 1):
-            st.markdown(f"### {i}. {result['Assessment Name']}")
-            st.markdown(f"**Test Type**: {result.get('Test Type', 'N/A')}")
-            st.markdown(f"**Target Audience**: {result.get('Target Audience', 'N/A')}")
-            st.markdown(f"**Description**: {result.get('Assessment Description', 'N/A')}")
-            st.markdown("---")
+    top_k = st.slider("🔢 Number of Recommendations", 1, 20, 10)
+
+    if st.button("🔎 Recommend Assessments"):
+        if not query.strip():
+            st.warning("Please enter a valid query.")
+        else:
+            with st.spinner("Finding best matches..."):
+                recommendations = recommend_assessments(query, model, embeddings, metadata, top_k=top_k)
+
+            if recommendations:
+                st.success(f"Top {top_k} Recommendations:")
+                for i, rec in enumerate(recommendations, 1):
+                    st.markdown(f"### {i}. {rec['Assessment Name']}")
+                    st.markdown(f"- **URL:** {rec['URL']}")
+                    st.markdown(f"- **Remote Testing:** {rec['Remote Testing Support']}")
+                    st.markdown(f"- **Adaptive/IRT:** {rec['Adaptive/IRT Support']}")
+                    st.markdown(f"- **Duration:** {rec['Duration']}")
+                    st.markdown(f"- **Test Type:** {rec['Test Type']}")
+                    st.markdown(f"- **Similarity Score:** {rec['Similarity Score']}")
+                    st.markdown("---")
+            else:
+                st.warning("No matching assessments found.")
 
 if __name__ == "__main__":
     main()
