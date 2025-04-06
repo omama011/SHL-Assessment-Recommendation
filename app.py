@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 # Load model, embeddings and metadata
 @st.cache_resource
 def load_model_and_embeddings():
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    model = SentenceTransformer("./all-MiniLM-L6-v2")
 
     # Load CSV and metadata
     data = pd.read_csv("shl_prepackaged_solutions_detailed.csv")
